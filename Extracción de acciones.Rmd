@@ -1,0 +1,110 @@
+---
+title: "R con SQL"
+author: "Cesar Arturo Ulloa Torres"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Para realizar un proceso similar en R, usamos las librerías DBI para gestionar bases de datos y odbc para realizar la conexión por medio de controladores, siendo el equivalente a pyodbc en python
+
+```{r}
+library(DBI)
+library(odbc)
+
+# Definir parámetros de conexión
+server <- "LAPTOP-Arturo"    # nombre del servidor
+database <- "Acciones"       # nombre de la base de datos
+
+# Conectar a la base de datos usando ODBC
+con <- dbConnect(odbc(),
+                 Driver   = "ODBC Driver 17 for SQL Server",
+                 Server   = server,
+                 Database = database,
+                 Trusted_Connection = "Yes")  # Usar autenticación de Windows
+```
+
+Ahora, usamos la librería quantmod, que funciona de manera similar a yfinance, con esta extraemos los datos de acciones
+
+```{r}
+library(quantmod)
+
+# Definir el Ticker
+Ticker <- "NVDA"
+
+# Descargar los datos de Yahoo Finance
+getSymbols(Symbols = Ticker, 
+            src = "yahoo", 
+            from = as.Date("2020-01-01"), 
+            to = as.Date("2024-12-31"),
+            auto.assign = TRUE)
+
+# Los datos se guardan en un objeto llamado igual que el ticker: NVDA
+head(NVDA, 10)  # Mostrar las primeras 10 filas
+```
+
+En el caso de R, no existe como tal columnas multinivel, pero vemos que en cada columna hay un prefijo que indica el nombre de la empresa, para eliminarlo, convertir el tipo de tabla a un dataframe y reordenar las columnas del dataframe para que se asemejen al proceso realizado en python empleamos las siguientes funciones:
+
+```{r}
+# Convertir de xts/zoo a data.frame clásico
+Nvidia1 <- data.frame(Date = index(NVDA), coredata(NVDA))
+
+# Eliminar el prefijo "NVDA." de los nombres de columnas
+colnames(Nvidia1) <- gsub("NVDA\\.", "", colnames(Nvidia1))
+
+# Reordenar las columnas manualmente
+Nvidia1 <- Nvidia1[, c("Date", "Close", "High", "Low", "Open", "Volume")]
+
+# Verificar el resultado
+head(Nvidia1, 10)
+```
+
+Ahora, con la tabla lista, procedemos a importar el dataframe a SQL usando los parámetros con los que hicimos la conexión inicialmente
+
+```{r}
+library(DBI)
+# Escribir el data.frame en la base de datos
+dbWriteTable(con, 
+             name = "Nvidia",     # Nombre de la tabla en SQL Server
+             value = Nvidia1,     # DataFrame que quieres guardar
+             overwrite = TRUE,    # Reemplaza la tabla si ya existe
+             row.names = FALSE)   # No guardar índices como columna
+
+```
+
+Ahora, realizamos la misma consulta de ejemplo para probar si se ha realizado la importación correctamente
+
+
+```{r}
+library(DBI)
+# Realizar la consulta SQL directamente
+Nvidia2023 <- dbGetQuery(con, "
+                        SELECT * 
+                        FROM Nvidia
+                        WHERE YEAR(Date) = 2023
+                        ORDER BY Date ASC
+                        ")
+
+# Verificar las primeras filas
+head(Nvidia2023, 10)
+```
+
+Por último, para corroborar que la consulta fue generada correctamente, extraemos el primer y último valor del dataframe
+
+
+```{r}
+# Extraer la primera fila
+primera_fila <- head(Nvidia2023, 1)
+
+# Extraer la última fila
+ultima_fila <- tail(Nvidia2023, 1)
+
+# Unir ambas filas verticalmente
+df_unido <- rbind(primera_fila, ultima_fila)
+
+# Mostrar el resultado
+print(df_unido)
+```
